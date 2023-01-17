@@ -1,3 +1,9 @@
+要处理：1.是前台还是后台. 
+2.几个Activity.栈内几个Activity
+3.当前Activity.用于恢复的时候判断要不要执行APP的初始化逻辑.
+4.恢复的时候APP只恢复进程和最近的Activity。
+5.是否有Stiky Service
+
 Activity状态图
 https://developer.android.google.cn/reference/android/app/Activity?hl=en
 此链接下的Activity Lifcycle章节有描述。
@@ -58,7 +64,8 @@ _source=distribute.pc_relevant_t0.none-task-blog-2%7Edefault%7ECTRLIST%7ERate-1-
 1）其实activity的生命周期，只有在正常的情况下，才会按顺序执行，如果发生其他状况，则另当别论。
 正常点击返回键： onDestroy方法一定会执行；
 从后台强杀分两种情况：
-第一种：当前仅有一个activity，这时候，强杀，是会执行onDestroy方法的；
+第一种：当前仅有一个activity（这个Activity之前不存在没有主动finish掉的Activity，有Activity但是被OS回收这个不属于仅一个Activity的场景），
+这时候，强杀，是会执行onDestroy方法的；
 第二种：栈里面的第一个没有销毁的activity会执行ondestroy方法，其他的不会执行。
 
 2）安卓后台杀死进程，Activity里 onDestroy会执行吗？
@@ -93,3 +100,69 @@ onPause或者onStop状态时，假如系统资源不足（内存不足），会�
 
 一下链接证明了此说法（看截图）
 https://blog.csdn.net/u013718730/article/details/102028503
+
+
+7.恢复哪个Activity
+从最近列表打开，恢复的栈顶Activity。App异常终止（异常包括App被回收，App奔溃，App Kill自己但没exit虚拟机）导致的重启，恢复
+的是top的上一个Activity。
+
+总结下， 进程回收之后，再从历史程序里点击的时候，进程会重启，然后只恢复栈顶的activity，其他栈内的activity只有在需要的时候被恢复。
+
+其他形式的进程死亡再恢复
+刚才我们说的是由于系统内存不足而回收进程，导致进程死亡的，但是实际上导致进程死亡的还有崩溃（比如空指针），ddms杀进程.
+这2种方式杀进程之后的恢复和回收进程的不太一样。因为这2种方式导致进程死亡，此时进程一般是前台进程，前台进程死亡，
+然后恢复并不会恢复栈顶activity，而是恢复栈顶前面的那个activity，为什么呢？
+我们来解释下，如果是崩溃导致进程死亡，那崩溃发生在栈顶的那个activity，此activity根本没调用 onSaveInstanceState，那
+怎么恢复？没法恢复，只能恢复上一个activity。
+同样，ddms杀进程也是一样的，只能恢复上一个。
+举个例子，当前有activity，A,B,C,D，此时界面上显示的是D，如果这2方式杀了进程，那么进程重启之后，恢复的是activity C。
+还有一点需要注意，如果此时D还没显示出来，界面上显示的是C，那用这2方式杀了进程后，重启后，恢复的是activity B，很好理解吧。
+那有个问题，在D的onCreate过程中出了崩溃，此时再恢复，是恢复哪个activity？？ 恩，D还在onCreate，所以此时界面是C，恢复的
+应该是前一个界面，所以恢复的是B。
+结论， 前台进程死亡后恢复，恢复的是当前显示的activity的上一个activity，记住activity要想被恢复，必须是经历过onSaveInstanceState的activity。
+
+再来几个问题
+有activity A,B,C
+回收进程，重启，会恢复C，然后在C的恢复过程中遇到崩溃，此时会再重启，恢复哪个activity呢？？   答案是B。
+我们知道DDMS杀了进程之后，会重启并恢复。有activity A,B,C ，用ddms杀，导致重启恢复B，再杀，将恢复A，再杀呢？额，不行了，
+此时进程就被干掉了，不再恢复
+
+
+
+
+8.Android 彻底退出自己APP 并杀掉所有相关的进程。通常要执行kill，然后执行exit。
+android.os.Process.killProcess(android.os.Process.myPid())
+可以杀死当前应用活动的进程，这一操作将会把所有该进程内的资源（包括线程全部清理掉）。当然，由于 ActivityManager 时刻监听着进程，
+一旦发现进程被非正常 Kill，它将会试图去重启这个进程。
+System.exit() 是 Java 中结束进程的方法，调用它将关闭当前的 JVM 虚拟机。
+通常在App crash 后重启利用killProcess和exit()两行代码真正杀死你的App。
+彻底杀掉 App 相关进程的代码
+public void killAppProcess()
+{
+	//注意：不能先杀掉主进程，否则逻辑代码无法继续执行，需先杀掉相关进程最后杀掉主进程
+    ActivityManager mActivityManager = (ActivityManager)CurrentActivity.this.getSystemService(Context.ACTIVITY_SERVICE);
+    List<ActivityManager.RunningAppProcessInfo> mList = mActivityManager.getRunningAppProcesses();
+    for (ActivityManager.RunningAppProcessInfo runningAppProcessInfo : mList) 
+    {
+        if (runningAppProcessInfo.pid != android.os.Process.myPid()) 
+        {
+            android.os.Process.killProcess(runningAppProcessInfo.pid);
+        }
+    }
+    android.os.Process.killProcess(android.os.Process.myPid());
+    System.exit(0);
+}
+
+
+
+
+
+9.Service黏贴标志START_STICKY。此标志除非手动停止Service，否则在App非正常情况下结束（App进程结束时，同一个进程内的
+Service自然也会结束）时Service会重启，Service重启时会创建Application这个进程，然后进入恢复7里面的流程。
+Service恢复案例。
+https://www.cnblogs.com/lesliefang/p/3933640.html#:~:text=1%20Process.killProcess%20%
+E5%92%8C%20System.exit%20%280%29%20%E4%B8%A4%E4%B8%AA%E9%83%BD%E4%BC
+%9A%20kill%20%E6%8E%89%E5%BD%93%E5%89%8D%E8%BF%9B%E7%A8%8B%E3%80%82
+,%E8%B0%83%E7%94%A8%20Process.killProcess%20%E6%88%96%20System.exit%20%280%2
+9%20%E9%83%BD%E4%BC%9A%20kill%20%E6%8E%89%E5%BD%93%E5%89%8D%E8%BF%9
+B%E7%A8%8B%E3%80%82
