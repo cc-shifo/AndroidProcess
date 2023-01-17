@@ -1,0 +1,23 @@
+public static boolean isBackGround(Context context, String pacetName) {
+        int i, j;
+        ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+        List<ActivityManager.RunningAppProcessInfo> apps = am.getRunningAppProcesses();
+        if (apps != null) {
+            j = apps.size();
+            for (i = 0; i < j; i++) {
+                if (apps.get(i).processName.equals(pacetName)) {
+                    if (apps.get(i).importance != ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND && apps.get(i).importance != ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+
+IMPORTANCE_BACKGROUND = 400 //后台
+IMPORTANCE_EMPTY = 500 //空进程
+MPORTANCE_FOREGROUND = 100 //在屏幕最前端,可获取焦点
+IMPORTANCE_SERVICE = 300 //在服务中
+IMPORTANCE_VISIBLE = 200 //在屏幕前端、获取不到焦点
